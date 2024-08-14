@@ -13,6 +13,14 @@
 // WLEDMM  - you can check for this define in usermods, to only enabled WLEDMM specific code in the "right" fork. Its not defined in AC WLED.
 #define _MoonModules_WLED_
 
+// a few hacks
+#if !defined(ARDUINO_ARCH_ESP32)
+#undef ESP_IDF_VERSION
+#if !defined(ESP_IDF_VERSION_VAL)
+#define ESP_IDF_VERSION_VAL(a,b,c) 99999999 // dummy
+#endif
+#endif
+
 //WLEDMM + Moustachauve/Wled-Native 
 // You can define custom product info from build flags.
 // This is useful to allow API consumer to identify what type of WLED version
@@ -128,6 +136,9 @@
 #include <SPI.h>
 
 #include "src/dependencies/network/Network.h"
+#if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#define Network WL_Network
+#endif
 
 #ifdef WLED_USE_MY_CONFIG
   #include "my_config.h"
@@ -327,7 +338,7 @@ WLED_GLOBAL int8_t irPin _INIT(-1);
 WLED_GLOBAL int8_t irPin _INIT(IRPIN);
 #endif
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S2) || (defined(RX) && defined(TX))
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32C3) ||  defined(CONFIG_IDF_TARGET_ESP32C6) ||defined(CONFIG_IDF_TARGET_ESP32S2) || (defined(RX) && defined(TX))
   // use RX/TX as set by the framework - these boards do _not_ have RX=3 and TX=1
   constexpr uint8_t hardwareRX = RX;
   constexpr uint8_t hardwareTX = TX;

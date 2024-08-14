@@ -88,4 +88,12 @@ bool NetworkClass::isEthernet()
   return false;
 }
 
+#ifdef ARDUINO_ARCH_ESP32
+#if defined(ESP_IDF_VERSION) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+NetworkClass WL_Network;
+#else
 NetworkClass Network;
+#endif
+#else
+NetworkClass Network;
+#endif
