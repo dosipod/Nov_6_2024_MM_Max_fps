@@ -516,7 +516,63 @@ void BusNetwork::cleanup() {
   if (_data != nullptr) free(_data);
   _data = nullptr;
 }
+// ***************************************************************************
+#ifdef WLED_ENABLE_I2SCLOCKLESS
 
+BusI2SClocklessLedDriver::BusI2SClocklessLedDriver(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWhite) {
+    USER_PRINTF("Construct BusI2SClocklessLedDriver\n");
+    _valid = false;
+    if (!pinManager.allocatePin(bc.pins[0], true, PinOwner::BusDigital)) return;
+    _pins[0] = bc.pins[0];
+    _pins[1] = bc.pins[1]; // TODO: remove once the UI knows we don't need clock pin
+    USER_PRINTF("initled using pin %d for %d LEDs\n", _pins[0], bc.count);
+    switch(bc.colorOrder) {
+      case 0: color = ORDER_GRB; break;
+      case 1: color = ORDER_RGB; break;
+      case 2: color = ORDER_BGR; break;
+    }
+
+    #ifdef CONFIG_IDF_TARGET_ESP32S3
+    USER_PRINTLN("no color order support for I2SClockLessLedDriveresp32s3");
+    driver.initled((uint8_t*)leds, _pins, 1, bc.count);
+    #else
+    driver.initled((uint8_t*)leds, _pins, 1, bc.count, color);
+    #endif
+
+    _len = bc.count;
+    _valid = true;
+  }
+
+void BusI2SClocklessLedDriver::setPixelColor(uint16_t pix, uint32_t c) {
+  if(_valid) {
+    #ifdef CONFIG_IDF_TARGET_ESP32S3
+    // TODO - use this.color to use the right ordering
+    this->leds[pix] = CRGB(R(c), G(c), B(c));
+    #else
+    this->driver.setPixel(pix, R(c), G(c), B(c));
+    #endif
+  }
+}
+
+void BusI2SClocklessLedDriver::show() {
+  if(_valid) driver.showPixels();
+}
+
+void BusI2SClocklessLedDriver::setBrightness(uint8_t b, bool immediate) {
+  if(_valid) driver.setBrightness(b);
+}
+
+uint8_t BusI2SClocklessLedDriver::getPins(uint8_t* pinArray) {
+  pinArray[0] = _pins[0];
+  pinArray[1] = _pins[1];
+  return 2;
+} 
+
+void BusI2SClocklessLedDriver::cleanup() {
+  pinManager.deallocatePin(_pins[0], PinOwner::BusDigital);
+}
+
+#endif
 // ***************************************************************************
 
 #ifdef WLED_ENABLE_HUB75MATRIX
@@ -998,6 +1054,10 @@ int BusManager::add(BusConfig &bc) {
 #else
     USER_PRINTLN("[unsupported! BusHub75Matrix] ");
     return -1;
+#endif
+#ifdef WLED_ENABLE_I2SCLOCKLESS
+  } else if (bc.type == TYPE_I2SCL) {
+    busses[numBusses] = new BusI2SClocklessLedDriver(bc);
 #endif
   } else if (IS_DIGITAL(bc.type)) {
     busses[numBusses] = new BusDigital(bc, numBusses, colorOrderMap);

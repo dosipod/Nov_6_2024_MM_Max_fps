@@ -6,6 +6,16 @@
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
 //extern volatile bool previousBufferFree; // experimental
 #endif
+
+#ifdef WLED_ENABLE_I2SCLOCKLESS
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+#include "I2SClockLessLedDriveresp32s3.h"
+#include <FastLED.h>
+#else
+#include "I2SClocklessLedDriver.h"
+#endif
+#endif
+
 /*
  * Class for addressing various light types
  */
@@ -354,6 +364,47 @@ class BusNetwork : public Bus {
     bool      _broadcastLock;
     byte     *_data;
 };
+
+#ifdef WLED_ENABLE_I2SCLOCKLESS
+
+class BusI2SClocklessLedDriver : public Bus {
+  public:
+    BusI2SClocklessLedDriver(BusConfig &bc);
+
+    uint16_t getMaxPixels() override { return 1024; }; // TODO: dynamic
+    bool hasRGB() { return true; }
+    bool hasWhite() { return false; }
+
+    void setPixelColor(uint16_t pix, uint32_t c);
+    void setBrightness(uint8_t b, bool immediate);
+
+    void show();
+
+    void cleanup();
+
+    uint8_t getPins(uint8_t* pinArray);
+
+    uint16_t getLength() {
+      return _len;
+    }
+  
+  ~BusI2SClocklessLedDriver() {
+    cleanup();
+  }
+
+  private:
+    #ifdef CONFIG_IDF_TARGET_ESP32S3
+    CRGB leds[1024]; // TODO: dynamic
+    I2SClocklessLedDriveresp32S3 driver;
+    #else
+    uint8_t leds[1024*3]; // TODO: dynamic
+    I2SClocklessLedDriver driver;
+    #endif
+    colorarrangment color;
+    int _pins[2] = {0,0};
+};
+
+#endif
 
 #ifdef WLED_ENABLE_HUB75MATRIX
 class BusHub75Matrix : public Bus {
