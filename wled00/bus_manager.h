@@ -355,6 +355,38 @@ class BusNetwork : public Bus {
     byte     *_data;
 };
 
+
+class BusFastLED : public Bus {
+  public:
+    BusFastLED(BusConfig &bc);
+
+    uint16_t getMaxPixels() override { return 1024; };
+    bool hasRGB() { return true; }
+    bool hasWhite() { return false; }
+
+    void setPixelColor(uint16_t pix, uint32_t c);
+    void setBrightness(uint8_t b, bool immediate);
+
+    uint32_t getPixelColor(uint16_t pix);
+
+    void show();
+
+    void cleanup() {
+      // TODO
+    }
+
+    uint8_t getPins(uint8_t* pinArray);
+
+    uint16_t getLength() {
+      return _len;
+    }
+
+  private: 
+    static CRGB leds[1024];
+    uint8_t _pins[4] = {0, 0};
+    
+};
+
 #ifdef WLED_ENABLE_HUB75MATRIX
 class BusHub75Matrix : public Bus {
   public:
@@ -437,6 +469,8 @@ class BusManager {
     inline uint8_t getNumBusses() const {
       return numBusses;
     }
+
+    bool hasFastLED = false; // can be used to check if FastLED driver is used
 
   private:
     uint8_t numBusses = 0;
