@@ -521,6 +521,10 @@ void BusNetwork::cleanup() {
 
 #ifdef WLED_ENABLE_HUB75MATRIX
 #warning "HUB75 driver enabled (experimental)"
+#ifdef ESP8266
+#error ESP8266 does not support HUB75
+#endif
+
 
 BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWhite) {
   size_t lastHeap = ESP.getFreeHeap();
@@ -529,15 +533,15 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
   fourScanPanel = nullptr;
   _len = 0;
 
-    mxconfig.double_buff = false; // Use our own memory-optimised buffer rather than the driver's own double-buffer  
- 
+  mxconfig.double_buff = false; // Use our own memory-optimised buffer rather than the driver's own double-buffer
+
   // mxconfig.driver = HUB75_I2S_CFG::ICN2038S;  // experimental - use specific shift register driver
   // mxconfig.driver = HUB75_I2S_CFG::FM6124;    // try this driver in case you panel stays dark, or when colors look too pastel
 
   // mxconfig.latch_blanking = 3;
   // mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_10M;  // experimental - 5MHZ should be enugh, but colours looks slightly better at 10MHz
   // mxconfig.min_refresh_rate = 90;
-  mxconfig.clkphase = false; // can help in case that the leftmost column is invisible, or pixels on the right side "bleeds out" to the left.
+  mxconfig.clkphase = bc.reversed; // can help in case that the leftmost column is invisible, or pixels on the right side "bleeds out" to the left.
  
   // How many panels we have connected, cap at sane value
   mxconfig.chain_length = max((uint8_t) 1, min(bc.pins[0], (uint8_t) 4)); // prevent bad data preventing boot due to low memory
@@ -590,28 +594,15 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
   } else mxconfig.setPixelColorDepthBits(8);
 #endif
 
+
+//  HUB75_I2S_CFG::i2s_pins _pins={R1_PIN, G1_PIN, B1_PIN, R2_PIN, G2_PIN, B2_PIN, A_PIN, B_PIN, C_PIN, D_PIN, E_PIN, LAT_PIN, OE_PIN, CLK_PIN};
+
 #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) // MatrixPortal ESP32-S3
 
   // https://www.adafruit.com/product/5778
-
   USER_PRINTLN("MatrixPanel_I2S_DMA - Matrix Portal S3 config");
+  mxconfig.gpio = { 42, 41, 40, 38, 39, 37,  45, 36, 48, 35, 21, 47, 14, 2 };
 
-  mxconfig.gpio.r1 = 42;
-  mxconfig.gpio.g1 = 41;
-  mxconfig.gpio.b1 = 40;
-  mxconfig.gpio.r2 = 38;
-  mxconfig.gpio.g2 = 39;
-  mxconfig.gpio.b2 = 37; 
-
-  mxconfig.gpio.lat = 47;
-  mxconfig.gpio.oe  = 14;
-  mxconfig.gpio.clk = 2;
-
-  mxconfig.gpio.a = 45;
-  mxconfig.gpio.b = 36;
-  mxconfig.gpio.c = 48;
-  mxconfig.gpio.d = 35;
-  mxconfig.gpio.e = 21;
 
 #elif defined(CONFIG_IDF_TARGET_ESP32S3) && defined(BOARD_HAS_PSRAM)// ESP32-S3
 
@@ -689,28 +680,11 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
 
 /*
     ESP32 with SmartMatrix's default pinout - ESP32_FORUM_PINOUT
-    
     https://github.com/pixelmatix/SmartMatrix/blob/teensylc/src/MatrixHardware_ESP32_V0.h
-
     Can use a board like https://github.com/rorosaurus/esp32-hub75-driver
 */
 
-  mxconfig.gpio.r1 = 2;
-  mxconfig.gpio.g1 = 15;
-  mxconfig.gpio.b1 = 4;
-  mxconfig.gpio.r2 = 16;
-  mxconfig.gpio.g2 = 27;
-  mxconfig.gpio.b2 = 17; 
-
-  mxconfig.gpio.lat = 26;
-  mxconfig.gpio.oe  = 25;
-  mxconfig.gpio.clk = 22;
-
-  mxconfig.gpio.a = 5;
-  mxconfig.gpio.b = 18;
-  mxconfig.gpio.c = 19;
-  mxconfig.gpio.d = 21;
-  mxconfig.gpio.e = 12;
+ mxconfig.gpio = { 2, 15, 4, 16, 27, 17, 5, 18, 19, 21, 12, 26, 25, 22 };
 
 #else
   USER_PRINTLN("MatrixPanel_I2S_DMA - Default pins");
@@ -723,25 +697,34 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
    https://www.electrodragon.com/product/rgb-matrix-panel-drive-interface-board-for-esp32-dma/
    
   */
-  mxconfig.gpio.r1 = 25;
-  mxconfig.gpio.g1 = 26;
-  mxconfig.gpio.b1 = 27;
-  mxconfig.gpio.r2 = 14;
-  mxconfig.gpio.g2 = 12;
-  mxconfig.gpio.b2 = 13;
-
-  mxconfig.gpio.lat = 4;
-  mxconfig.gpio.oe  = 15;
-  mxconfig.gpio.clk = 16;
-
-  mxconfig.gpio.a = 23;
-  mxconfig.gpio.b = 19;
-  mxconfig.gpio.c = 5;
-  mxconfig.gpio.d = 17;
-  mxconfig.gpio.e = 18;
+ mxconfig.gpio = { 25, 26, 27, 14, 12, 13, 23, 9, 5, 17, 18, 4, 15, 16 }; 
 
 #endif
 
+  uint8_t pins[PIN_COUNT];
+  memcpy(pins, &mxconfig.gpio, sizeof(mxconfig.gpio));
+  pinManager.allocateMultiplePins(pins, PIN_COUNT, PinOwner::HUB75, true);
+
+  if(bc.colorOrder == COL_ORDER_RGB) {
+    DEBUG_PRINTLN("MatrixPanel_I2S_DMA = Default color order (RGB)");
+  } else if(bc.colorOrder == COL_ORDER_BGR) {
+    DEBUG_PRINTLN("MatrixPanel_I2S_DMA = color order BGR");
+    uint8_t tmpPin;
+    tmpPin = mxconfig.gpio.r1;
+    mxconfig.gpio.r1 = mxconfig.gpio.b1;
+    mxconfig.gpio.b1 = tmpPin;
+    tmpPin = mxconfig.gpio.r2;
+    mxconfig.gpio.r2 = mxconfig.gpio.b2;
+    mxconfig.gpio.b2 = tmpPin;
+  }
+  else {
+    DEBUG_PRINTF("MatrixPanel_I2S_DMA = unsupported color order %u\n", bc.colorOrder);
+  }
+
+  DEBUG_PRINTF("MatrixPanel_I2S_DMA config - %ux%u length: %u\n", mxconfig.mx_width, mxconfig.mx_height, mxconfig.chain_length);
+  DEBUG_PRINTF("R1_PIN=%u, G1_PIN=%u, B1_PIN=%u, R2_PIN=%u, G2_PIN=%u, B2_PIN=%u, A_PIN=%u, B_PIN=%u, C_PIN=%u, D_PIN=%u, E_PIN=%u, LAT_PIN=%u, OE_PIN=%u, CLK_PIN=%u\n",
+                mxconfig.gpio.r1, mxconfig.gpio.g1, mxconfig.gpio.b1, mxconfig.gpio.r2, mxconfig.gpio.g2, mxconfig.gpio.b2,
+                mxconfig.gpio.a, mxconfig.gpio.b, mxconfig.gpio.c, mxconfig.gpio.d, mxconfig.gpio.e, mxconfig.gpio.lat, mxconfig.gpio.oe, mxconfig.gpio.clk);
   USER_PRINTF("MatrixPanel_I2S_DMA config - %ux%u (type %u) length: %u, %u bits/pixel.\n", mxconfig.mx_width, mxconfig.mx_height, bc.type, mxconfig.chain_length, mxconfig.getPixelColorDepthBits() * 3);
   DEBUG_PRINT(F("Free heap: ")); DEBUG_PRINTLN(ESP.getFreeHeap()); lastHeap = ESP.getFreeHeap();
 
@@ -755,29 +738,9 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
 
   this->_len = (display->width() * display->height());
 
-  pinManager.allocatePin(mxconfig.gpio.r1, true, PinOwner::HUB75);
-  pinManager.allocatePin(mxconfig.gpio.g1, true, PinOwner::HUB75);
-  pinManager.allocatePin(mxconfig.gpio.b1, true, PinOwner::HUB75);
-  pinManager.allocatePin(mxconfig.gpio.r2, true, PinOwner::HUB75);
-  pinManager.allocatePin(mxconfig.gpio.g2, true, PinOwner::HUB75);
-  pinManager.allocatePin(mxconfig.gpio.b2, true, PinOwner::HUB75);
-
-  pinManager.allocatePin(mxconfig.gpio.lat, true, PinOwner::HUB75);
-  pinManager.allocatePin(mxconfig.gpio.oe, true, PinOwner::HUB75);
-  pinManager.allocatePin(mxconfig.gpio.clk, true, PinOwner::HUB75);
-
-  pinManager.allocatePin(mxconfig.gpio.a, true, PinOwner::HUB75);
-  pinManager.allocatePin(mxconfig.gpio.b, true, PinOwner::HUB75);
-  pinManager.allocatePin(mxconfig.gpio.c, true, PinOwner::HUB75);
-  pinManager.allocatePin(mxconfig.gpio.d, true, PinOwner::HUB75);
-  pinManager.allocatePin(mxconfig.gpio.e, true, PinOwner::HUB75);
-
-  // display->setLatBlanking(4);
-
   USER_PRINTLN("MatrixPanel_I2S_DMA created");
   // let's adjust default brightness
   display->setBrightness8(25);    // range is 0-255, 0 - 0%, 255 - 100%
-  _bri = 25;
 
   delay(24); // experimental
   DEBUG_PRINT(F("heap usage: ")); DEBUG_PRINTLN(lastHeap - ESP.getFreeHeap());
@@ -797,9 +760,10 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
 
     if (_ledBuffer) free(_ledBuffer);                 // should not happen
     if (_ledsDirty) free(_ledsDirty);                 // should not happen
-
+    DEBUG_PRINTLN("MatrixPanel_I2S_DMA allocate memory");
     _ledsDirty = (byte*) malloc(getBitArrayBytes(_len));  // create LEDs dirty bits
-
+    DEBUG_PRINTLN("MatrixPanel_I2S_DMA allocate memory ok");
+   
     if (_ledsDirty == nullptr) {
       display->stopDMAoutput();
       delete display; display = nullptr;
@@ -916,7 +880,6 @@ uint32_t __attribute__((hot)) BusHub75Matrix::getPixelColorRestored(uint16_t pix
 
 void BusHub75Matrix::setBrightness(uint8_t b, bool immediate) {
   _bri = b;
-  // if (_bri > 238) _bri=238; // not strictly needed. Enable this line if you see glitches at highest brightness.
   display->setBrightness(_bri);
 }
 
@@ -975,25 +938,18 @@ void BusHub75Matrix::cleanup() {
 }
 
 void BusHub75Matrix::deallocatePins() {
-
-  pinManager.deallocatePin(mxconfig.gpio.r1, PinOwner::HUB75);
-  pinManager.deallocatePin(mxconfig.gpio.g1, PinOwner::HUB75);
-  pinManager.deallocatePin(mxconfig.gpio.b1, PinOwner::HUB75);
-  pinManager.deallocatePin(mxconfig.gpio.r2, PinOwner::HUB75);
-  pinManager.deallocatePin(mxconfig.gpio.g2, PinOwner::HUB75);
-  pinManager.deallocatePin(mxconfig.gpio.b2, PinOwner::HUB75);
-
-  pinManager.deallocatePin(mxconfig.gpio.lat, PinOwner::HUB75);
-  pinManager.deallocatePin(mxconfig.gpio.oe, PinOwner::HUB75);
-  pinManager.deallocatePin(mxconfig.gpio.clk, PinOwner::HUB75);
-
-  pinManager.deallocatePin(mxconfig.gpio.a, PinOwner::HUB75);
-  pinManager.deallocatePin(mxconfig.gpio.b, PinOwner::HUB75);
-  pinManager.deallocatePin(mxconfig.gpio.c, PinOwner::HUB75);
-  pinManager.deallocatePin(mxconfig.gpio.d, PinOwner::HUB75);
-  pinManager.deallocatePin(mxconfig.gpio.e, PinOwner::HUB75);
-
+  uint8_t pins[PIN_COUNT];
+  memcpy(pins, &mxconfig.gpio, sizeof(mxconfig.gpio));
+  pinManager.deallocateMultiplePins(pins, PIN_COUNT, PinOwner::HUB75);
 }
+
+uint8_t BusHub75Matrix::getPins(uint8_t* pinArray) const {
+  pinArray[0] = mxconfig.mx_width;
+  pinArray[1] = mxconfig.mx_height;
+  pinArray[2] = mxconfig.chain_length;
+  return 3;
+}
+
 #endif
 // ***************************************************************************
 
