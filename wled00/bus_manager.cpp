@@ -495,7 +495,7 @@ BusNetwork::BusNetwork(BusConfig &bc, const ColorOrderMap &com) : Bus(bc.type, b
 
 void IRAM_ATTR BusNetwork::setPixelColor(uint16_t pix, uint32_t c) {
   if (!_valid || pix >= _len) return;
-  if (_rgbw) c = autoWhiteCalc(c);
+  if (hasWhite()) c = autoWhiteCalc(c);
   if (_cct >= 1900) c = colorBalanceFromKelvin(_cct, c); //color correction from CCT
   uint16_t offset = pix * _UDPchannels;
   uint8_t co = _colorOrderMap.getPixelColorOrder(pix+_start, _colorOrder);
@@ -604,7 +604,7 @@ uint8_t BusHub75Matrix::instanceCount = 0;
     // PSRAM not used for pixel buffers
     #define MAX_PIXELS_8BIT (128 * 64)
     #define MAX_PIXELS_6BIT (192 * 64)
-    #define MAX_PIXELS_4BIT (256 * 64)
+    #define MAX_PIXELS_4BIT (192 * 128) // MAX_PIXELS_4BIT (256 * 64)
   #endif
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
   // standard esp32-S3
@@ -831,14 +831,6 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
   mxconfig.gpio.d = 21;
   mxconfig.gpio.e = 12;
 
-  // mxconfig.double_buff = true; // <------------- Turn on double buffer
-  // mxconfig.driver = HUB75_I2S_CFG::ICN2038S;  // experimental - use specific shift register driver
-  //mxconfig.latch_blanking = 3;
-  // mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_10M;  // experimental - 5MHZ should be enugh, but colours looks slightly better at 10MHz
-  //mxconfig.min_refresh_rate = 90;
-  //mxconfig.min_refresh_rate = 120;
-  // mxconfig.clkphase = false;  // can help in case that the leftmost column is invisible, or pixels on the right side "bleeds out" to the left.
-
 #else
   USER_PRINTLN("MatrixPanel_I2S_DMA - Default pins");
   /*
@@ -869,11 +861,11 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
 
 #endif
 
-  #ifndef PIXEL_COLOR_DEPTH_BIT
-    #define PIXEL_COLOR_DEPTH_BIT 8
-  #endif
+  // #ifndef PIXEL_COLOR_DEPTH_BIT
+  //   #define PIXEL_COLOR_DEPTH_BIT 8
+  // #endif
 
-  mxconfig.setPixelColorDepthBits(PIXEL_COLOR_DEPTH_BIT);
+  // mxconfig.setPixelColorDepthBits(PIXEL_COLOR_DEPTH_BIT);
   mxconfig.double_buff = false; // default to off, known to cause issue with some effects but needs more memory
   mxconfig.clkphase = false;
   mxconfig.chain_length = max((u_int8_t) 1, min(bc.pins[0], (u_int8_t) 6)); // prevent bad data preventing boot due to low memory
@@ -927,8 +919,6 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
       USER_PRINT(F("heap usage: ")); USER_PRINTLN(int(lastHeap - ESP.getFreeHeap()));
       return;
   }
-  // virtualDisp = new VirtualMatrixPanel((*dma_display), NUM_ROWS, NUM_COLS, PANEL_RES_X, PANEL_RES_Y, VIRTUAL_MATRIX_CHAIN_TYPE); 
-  display = new VirtualMatrixPanel((*realdisplay), 2, 3, 64, 64, CHAIN_BOTTOM_RIGHT_UP );
 
   this->_len = (display->width() * display->height());
 
@@ -971,11 +961,9 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
     
     USER_PRINT(F("heap usage: ")); USER_PRINTLN(int(lastHeap - ESP.getFreeHeap()));
     delay(18);   // experiment - give the driver a moment (~ one full frame @ 60hz) to settle
-    // let's adjust default brightness
-    realdisplay->setBrightness8(25);    // range is 0-255, 0 - 0%, 255 - 100%
-    _bri = 25;
     _valid = true;
     display->clearScreen();   // initially clear the screen buffer
+    USER_PRINTLN("MatrixPanel_I2S_DMA clear ok");
 
     if (_ledBuffer) free(_ledBuffer);                 // should not happen
     if (_ledsDirty) free(_ledsDirty);                 // should not happen
@@ -1030,6 +1018,9 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
       fourScanPanel->setRotation(0);
       break;
   }  
+
+  // virtualDisp = new VirtualMatrixPanel((*dma_display), NUM_ROWS, NUM_COLS, PANEL_RES_X, PANEL_RES_Y, VIRTUAL_MATRIX_CHAIN_TYPE); 
+  fourScanPanel = new VirtualMatrixPanel((*display), 2, 3, 64, 64, CHAIN_BOTTOM_RIGHT_UP );
 
   if (_valid) {
     _panelWidth = fourScanPanel ? fourScanPanel->width() : display->width();  // cache width - it will never change

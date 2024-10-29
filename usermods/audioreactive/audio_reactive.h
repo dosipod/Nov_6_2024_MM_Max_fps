@@ -389,8 +389,8 @@ constexpr uint16_t samplesFFT_2 = 256;          // meaningful part of FFT result
 #define LOG_256  5.54517744f                            // log(256)
 
 // These are the input and output vectors.  Input vectors receive computed results from FFT.
-__attribute__((aligned(16))) static float vReal[samplesFFT] = {0.0f};       // FFT sample inputs / freq output -  these are our raw result bins
-__attribute__((aligned(16))) static float vImag[samplesFFT] = {0.0f};       // imaginary parts
+static float* vReal = nullptr;       // FFT sample inputs / freq output -  these are our raw result bins
+static float* vImag = nullptr;       // imaginary parts
 
 // making it easier to use biquad filter calculator from https://www.earlevel.com/main/2013/10/13/biquad-calculator-v2/
 float a0 = 0.0f;
@@ -506,7 +506,7 @@ static void runDCBlocker(uint_fast16_t numSamples, float *sampleBuffer) {
   static float xm1 = 0.0f;
   static SR_HIRES_TYPE ym1 = 0.0f;
 
-  for (uint_fast16_t i=0; i < numSamples; i++) {
+  for (unsigned i=0; i < numSamples; i++) {
     float value = sampleBuffer[i];
     SR_HIRES_TYPE filtered = (SR_HIRES_TYPE)(value-xm1) + filterR*ym1;
     xm1 = value;
@@ -559,7 +559,9 @@ void FFTcode(void * parameter)
   #else
     static float windowWeighingFactors[samplesFFT] = {0.0f};                                        // cache for FFT windowing factors - use global RAM
   #endif
+  #ifndef UM_AUDIOREACTIVE_USE_ESPDSP_FFT 
   static ArduinoFFT<float> FFT = ArduinoFFT<float>( vReal, vImag, samplesFFT, SAMPLE_RATE, windowWeighingFactors);
+  #endif
 #endif
 
   #ifdef FFT_MAJORPEAK_HUMAN_EAR
@@ -573,8 +575,7 @@ void FFTcode(void * parameter)
   pinkFactors[0] *= 0.5;  // suppress 0-42hz bin
   #endif
 
-  #ifdef UM_AUDIOREACTIVE_USE_ESPDSP_FFT
-  #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
+  #if defined(UM_AUDIOREACTIVE_USE_ESPDSP_FFT) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
 
   esp_err_t myerr = dsps_fft4r_init_fc32(NULL, samplesFFT >> 1);
   if (myerr  != ESP_OK) {
@@ -642,7 +643,6 @@ void FFTcode(void * parameter)
   float coeffs_notch[5] = { a0, a1, a2, b1, b2 }; 
   float w_notch[5] = {0, 0};
 
-  #endif
   #endif
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -798,10 +798,8 @@ void FFTcode(void * parameter)
         if (__builtin_signbit(vReal[i]) != __builtin_signbit(vReal[i+1]))  // test sign bit: sign changed -> zero crossing
             newZeroCrossingCount++;
       }
-      #ifdef UM_AUDIOREACTIVE_USE_ESPDSP_FFT
-      #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
+      #if defined(UM_AUDIOREACTIVE_USE_ESPDSP_FFT) && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 4, 0)
       vReal[i] *= window[i]; // FFT windowing for ESP-DSP
-      #endif
       #endif
     }
     newZeroCrossingCount = (newZeroCrossingCount*2)/3; // reduce value so it typically stays below 256
@@ -1131,17 +1129,8 @@ static void postProcessFFTResults(bool noiseGateOpen, int numberOfChannels, bool
     for (int i=0; i < numberOfChannels; i++) {
 
       if (noiseGateOpen) { // noise gate open
-
-        if (TROYHACKS_PINKY) {
-          fftBinAverage[i] = fftBinAverage[i] * 0.99 + (0.01 * fftCalc[i] * FFT_DOWNSCALE * (soundAgc ? multAgc : ((float)sampleGain/40.0f * (float)inputLevel/128.0f + 1.0f/16.0f)));
-        }
         // Adjustment for frequency curves.
-        if (fftBinAverage[0] != 0 && !TROYHACKS_PINKY) {
-          fftCalc[i] *= fftBinAverage[i];
-        } else {
-          fftCalc[i] *= fftResultPink[pinkIndex][i];
-        }
-        
+        fftCalc[i] *= fftResultPink[pinkIndex][i];
         if (FFTScalingMode > 0) fftCalc[i] *= FFT_DOWNSCALE;  // adjustment related to FFT windowing function
         // Manual linear adjustment of gain using sampleGain adjustment for different input types.
         fftCalc[i] *= soundAgc ? multAgc : ((float)sampleGain/40.0f * (float)inputLevel/128.0f + 1.0f/16.0f); //apply gain, with inputLevel adjustment
@@ -2861,8 +2850,6 @@ class AudioReactive : public Usermod {
         infoArr = user.createNestedArray(F("Filtering time"));
         infoArr.add(roundf(filterTime)/100.0f);
         infoArr.add(" ms");
-
-        infoArr.add(roundf(fftTime)/100.0f);
 
 #ifdef FFT_USE_SLIDING_WINDOW
         unsigned timeBudget = doSlidingFFT ? (FFT_MIN_CYCLE) : fftTaskCycle / 115;
