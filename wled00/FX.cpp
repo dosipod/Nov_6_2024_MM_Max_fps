@@ -5276,7 +5276,11 @@ uint16_t mode_2Dgameoflife(void) { // Written by Ewoud Wijma, inspired by https:
   if (SEGENV.call == 0) {
     SEGMENT.setUpLeds();
     SEGMENT.fill(BLACK); // to make sure that segment buffer and physical leds are aligned initially
+    SEGENV.step = 0;
   }
+  // fix SEGENV.step in case that timebase jumps
+  if (abs(long(strip.now) - long(SEGENV.step)) > 2000) SEGENV.step = 0;
+
   // Setup New Game of Life
   if ((SEGENV.call == 0 || generation == 0) && SEGENV.step < strip.now) {
     SEGENV.step = strip.now + 1250; // show initial state for 1.25 seconds
@@ -5458,6 +5462,9 @@ uint16_t mode_2DSnowFall(void) { // By: Brandon Butler
     }
   }
    
+  // fix SEGENV.step in case that timebase jumps
+  if (abs(long(strip.now) - long(SEGENV.step)) > 2000) SEGENV.step = 0;
+
   uint8_t speed = map(SEGMENT.speed, 0, 255, 0, 60);                      // Updates per second
   if (!speed || strip.now - SEGENV.step < 1000 / speed) return FRAMETIME; // Not enough time passed
 
@@ -6441,6 +6448,9 @@ uint16_t mode_2Dfloatingblobs(void) {
   if (!SEGENV.allocateData(sizeof(blob_t))) return mode_static(); //allocation failed
   blob_t *blob = reinterpret_cast<blob_t*>(SEGENV.data);
 
+  // WLEDMM fix SEGENV.step in case that timebase jumps
+  if (abs(long(strip.now) - long(SEGENV.step)) > 2000) SEGENV.step = 0;
+
   if (SEGENV.call == 0)  {SEGENV.setUpLeds(); SEGMENT.fill(BLACK);}
   if (SEGENV.aux0 != cols || SEGENV.aux1 != rows) {
     SEGENV.aux0 = cols; // re-initialise if virtual size changes
@@ -6550,6 +6560,7 @@ uint16_t mode_2Dscrollingtext(void) {
   unsigned maxLen = (SEGMENT.name) ? min(32, (int)strlen(SEGMENT.name)) : 0;  // WLEDMM make it robust against too long segment names
   if (SEGMENT.name) for (size_t i=0,j=0; i<maxLen; i++) if (SEGMENT.name[i]>31 && SEGMENT.name[i]<128) text[j++] = SEGMENT.name[i];
   const bool zero = strchr(text, '0') != nullptr;
+  bool drawShadow = (SEGMENT.check2); // "shadow" is only needed for overlays to improve readability
 
   // #ERR = show last error code
   if ((strlen(text) > 3) && (strncmp_P(text,PSTR("#ERR"),4) == 0)) {
@@ -6569,6 +6580,7 @@ uint16_t mode_2Dscrollingtext(void) {
   }
 
   if (!strlen(text) || !strncmp_P(text,PSTR("#F"),2) || !strncmp_P(text,PSTR("#P"),2) || !strncmp_P(text,PSTR("#A"),2) || !strncmp_P(text,PSTR("#DATE"),5) || !strncmp_P(text,PSTR("#DDMM"),5) || !strncmp_P(text,PSTR("#MMDD"),5) || !strncmp_P(text,PSTR("#TIME"),5) || !strncmp_P(text,PSTR("#HH"),3) || !strncmp_P(text,PSTR("#MM"),3)) { // fallback if empty segment name: display date and time
+    if (!strncmp_P(text,PSTR("#D"),2) || !strncmp_P(text,PSTR("#MM"),3) || !strncmp_P(text,PSTR("#HH"),3)) drawShadow = false; // no seconds - no shadow needed
     char sec[5]= {'\0'};
     byte AmPmHour = hour(localTime);
     boolean isitAM = true;
@@ -6586,12 +6598,13 @@ uint16_t mode_2Dscrollingtext(void) {
     else if (!strncmp_P(text,PSTR("#HH"),3))   sprintf_P(text, zero?PSTR("%02d")          :PSTR("%d"),         AmPmHour);
     else if (!strncmp_P(text,PSTR("#MM"),3))   sprintf_P(text, zero?PSTR("%02d")          :PSTR("%d"),        minute(localTime));
     else if (!strncmp_P(text,PSTR("#FPS"),4)) sprintf_P(text, PSTR("%3d"), (int) strip.getFps());                     // WLEDMM
-    else if ((!strncmp_P(text,PSTR("#AMP"),4)) || (!strncmp_P(text,PSTR("#POW"),4))) sprintf_P(text, PSTR("%3.2fA"), float(strip.currentMilliamps)/1000.0f); // WLEDMM
+    else if ((!strncmp_P(text,PSTR("#AMP"),4)) || (!strncmp_P(text,PSTR("#POW"),4))) sprintf_P(text, PSTR("%3.1fA"), float(strip.currentMilliamps)/1000.0f); // WLEDMM
     else sprintf_P(text, PSTR("%s %d, %d %d:%02d%s"), monthShortStr(month(localTime)), day(localTime), year(localTime), AmPmHour, minute(localTime), sec);
-  }
+  } else drawShadow = false;  // static text does not require shadow
   const int numberOfLetters = strlen(text);
 
-  if (SEGENV.step < strip.now) {
+  long delayTime = long(strip.now) - long(SEGENV.step);
+  if ((delayTime >= 0) || (abs(delayTime) > 1500)) {   // WLEDMM keep on scrolling if timebase jumps (supersync, or brightness off, or wifi delay)
     if ((numberOfLetters * letterWidth) > cols) ++SEGENV.aux0 %= (numberOfLetters * letterWidth) + cols;      // offset
     else                                          SEGENV.aux0  = (cols + (numberOfLetters * letterWidth))/2;
     SEGENV.aux1 = (SEGENV.aux1 + 1) & 0xFF; // color shift // WLEDMM changed to prevent overflow
@@ -6607,7 +6620,7 @@ uint16_t mode_2Dscrollingtext(void) {
     }
   }
 
-  bool drawShadow = (SEGMENT.check2);
+  if (SEGENV.check2 && ((numberOfLetters * letterWidth) > cols)) drawShadow = true; // scrolling overlay is easier to read with shadow
   for (int i = 0; i < numberOfLetters; i++) {
     if (int(cols) - int(SEGENV.aux0) + letterWidth*(i+1) < 0) continue; // don't draw characters off-screen
     uint32_t col1 = SEGMENT.color_from_palette(SEGENV.aux1, false, PALETTE_SOLID_WRAP, 0);
@@ -8020,7 +8033,7 @@ uint16_t mode_2DGEQ(void) { // By Will Tatam. Code reduction by Ewoud Wijma.
       colorIndex = map(x, 0, cols-1, 0, 255); //WLEDMM
     }
     lastBandHeight = bandHeight; // remember BandHeight (left side) for next iteration
-    uint16_t barHeight = map(bandHeight, 0, 255, 0, rows); // Now we map bandHeight to barHeight. do not subtract -1 from rows here
+    uint16_t barHeight = map2(bandHeight, 0, 255, 0, rows); // Now we map bandHeight to barHeight. do not subtract -1 from rows here
     // WLEDMM end
 
     if (barHeight > rows) barHeight = rows;                      // WLEDMM map() can "overshoot" due to rounding errors
@@ -8029,7 +8042,7 @@ uint16_t mode_2DGEQ(void) { // By Will Tatam. Code reduction by Ewoud Wijma.
     uint32_t ledColor = BLACK;
     if ((! SEGMENT.check1) && (barHeight > 0)) {  // use faster drawLine when single-color bars are needed
       ledColor = SEGMENT.color_from_palette(colorIndex, false, PALETTE_SOLID_WRAP, 0);
-      SEGMENT.drawLine(int(x), max(0,int(rows)-barHeight-1), int(x), int(rows-1), ledColor, false); // max(0, ...) to prevent negative Y
+      SEGMENT.drawLine(int(x), max(0,int(rows)-barHeight), int(x), int(rows-1), ledColor, false); // max(0, ...) to prevent negative Y
     } else {
     for (int y=0; y < barHeight; y++) {
       if (SEGMENT.check1) //color_vertical / color bars toggle
