@@ -453,8 +453,22 @@ void Segment::setPixelColorXY(float x, float y, uint32_t col, bool aa, bool fast
 #endif
 }
 
-// returns RGBW values of pixel
-uint32_t IRAM_ATTR_YN Segment::getPixelColorXY(int x, int y) const {
+// returns RGBW values of pixel - faster as we skip sanity checks
+uint32_t IRAM_ATTR_YN Segment::getPixelColorXY_fast(int x, int y, int cols, int rows) const {
+  if (ledsrgb) {
+    int i = x + y*cols; // avoid error checking done by XY() - be optimistic about ranges of x and y
+    return RGBW32(ledsrgb[i].r, ledsrgb[i].g, ledsrgb[i].b, 0);
+  }
+  if (reverse  ) x = cols - x - 1;
+  if (reverse_y) y = rows - y - 1;
+  if (transpose) std::swap(x,y); // swap X & Y if segment transposed
+  const uint_fast16_t groupLength_ = groupLength(); // WLEDMM small optimization
+  x *= groupLength_; // expand to physical pixels
+  y *= groupLength_; // expand to physical pixels
+  return strip.getPixelColorXYRestored(start + x, startY + y);
+}
+
+uint32_t IRAM_ATTR_YN Segment::getPixelColorXY_slow(int x, int y) const {
   if (x<0 || y<0 || !isActive()) return 0; // not active or out-of range
   if (ledsrgb) {
     int i = XY(x,y);
@@ -482,7 +496,7 @@ void IRAM_ATTR_YN Segment::addPixelColorXY(int x, int y, uint32_t color, bool fa
   // if (x >= virtualWidth() || y >= virtualHeight() || x<0 || y<0) return;  // if pixel would fall out of virtual segment just exit //WLEDMM
   uint32_t oldCol = getPixelColorXY(x,y);
   uint32_t col = color_add(oldCol, color, fast);
-  if (col != oldCol) setPixelColorXY(x, y, col);
+  if (col != oldCol) setPixelColorXY_nochecks(x, y, col);
 }
 
 void Segment::fadePixelColorXY(uint16_t x, uint16_t y, uint8_t fade) {
@@ -490,7 +504,7 @@ void Segment::fadePixelColorXY(uint16_t x, uint16_t y, uint8_t fade) {
   CRGB pix = CRGB(getPixelColorXY(x,y));
   CRGB oldPix = pix;
   pix = pix.nscale8_video(fade);
-  if (pix != oldPix) setPixelColorXY(int(x), int(y), pix);
+  if (pix != oldPix) setPixelColorXY_nochecks(int(x), int(y), pix);
 }
 
 // blurRow: perform a blur on a row of a rectangular matrix
@@ -508,7 +522,7 @@ void Segment::blurRow(uint32_t row, fract8 blur_amount, bool smear){
   uint32_t last;
   uint32_t curnew = 0;
   for (unsigned x = 0; x < cols; x++) {
-    uint32_t cur = getPixelColorXY(x, row);
+    uint32_t cur = getPixelColorXY_fast(x, row, cols, rows);
     uint32_t part = color_fade(cur, seep);
     curnew = color_fade(cur, keep);
     if (x > 0) {
@@ -516,10 +530,10 @@ void Segment::blurRow(uint32_t row, fract8 blur_amount, bool smear){
         curnew = color_add(curnew, carryover, !smear); // WLEDMM don't use "fast" when smear==true (better handling of bright colors)
       uint32_t prev = color_add(lastnew, part, !smear);// WLEDMM
       if (last != prev) // optimization: only set pixel if color has changed
-        setPixelColorXY(int(x - 1), int(row), prev);
+        setPixelColorXY_nochecks(int(x - 1), int(row), prev);
     }
     else // first pixel
-      setPixelColorXY(int(x), int(row), curnew);
+      setPixelColorXY_nochecks(int(x), int(row), curnew);
     lastnew = curnew;
     last = cur; // save original value for comparison on next iteration
     carryover = part;
@@ -542,7 +556,7 @@ void Segment::blurCol(uint32_t col, fract8 blur_amount, bool smear) {
   uint32_t last;
   uint32_t curnew = 0;
   for (unsigned y = 0; y < rows; y++) {
-    uint32_t cur = getPixelColorXY(col, y);
+    uint32_t cur = getPixelColorXY_fast(col, y, cols, rows);
     uint32_t part = color_fade(cur, seep);
     curnew = color_fade(cur, keep);
     if (y > 0) {
@@ -550,10 +564,10 @@ void Segment::blurCol(uint32_t col, fract8 blur_amount, bool smear) {
         curnew = color_add(curnew, carryover, !smear);  // WLEDMM don't use "fast" when smear==true (better handling of bright colors)
       uint32_t prev = color_add(lastnew, part, !smear); // WLEDMM
       if (last != prev) // optimization: only set pixel if color has changed
-        setPixelColorXY(int(col), int(y - 1), prev);
+        setPixelColorXY_nochecks(int(col), int(y - 1), prev);
     }
     else // first pixel
-      setPixelColorXY(int(col), int(y), curnew);
+      setPixelColorXY_nochecks(int(col), int(y), curnew);
     lastnew = curnew;
     last = cur; //save original value for comparison on next iteration
     carryover = part;        
@@ -610,7 +624,7 @@ void Segment::moveX(int8_t delta, bool wrap) {
       for (int x = cols-1; x >= -delta; x--) newPxCol[x] = getPixelColorXY((x + delta), y);
       for (int x = -delta-1; x >= 0; x--)    newPxCol[x] = getPixelColorXY(wrap ? (x + delta) + cols : x, y);
     }
-    for (int x = 0; x < cols; x++) setPixelColorXY(x, y, newPxCol[x]);
+    for (int x = 0; x < cols; x++) setPixelColorXY_nochecks(x, y, newPxCol[x]);
   }
 }
 
@@ -628,7 +642,7 @@ void Segment::moveY(int8_t delta, bool wrap) {
       for (int y = rows-1; y >= -delta; y--) newPxCol[y] = getPixelColorXY(x, (y + delta));
       for (int y = -delta-1; y >= 0; y--)    newPxCol[y] = getPixelColorXY(x, wrap ? (y + delta) + rows : y);
     }
-    for (int y = 0; y < rows; y++) setPixelColorXY(x, y, newPxCol[y]);
+    for (int y = 0; y < rows; y++) setPixelColorXY_nochecks(x, y, newPxCol[y]);
   }
 }
 
@@ -724,7 +738,7 @@ void Segment::fillCircle(unsigned cx, unsigned cy, int radius, uint32_t col, boo
   for (int y = starty; y <= endy; y++) {
     for (int x = startx; x <= endx; x++) {
       if ((x * x + y * y) <= maxRadius2) {
-        setPixelColorXY(cx + x, cy + y, col);
+        setPixelColorXY_nochecks(cx + x, cy + y, col);
       }
     }
   }
@@ -808,10 +822,10 @@ void Segment::drawLine(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint3
       // pixel coverage is determined by fractional part of y co-ordinate
 
       // WLEDMM added out-of-bounds check: "unsigned(x) < cols" catches negative numbers _and_ too large values
-      if ((unsigned(x) < unsigned(cols)) && (unsigned(y) < unsigned(rows)))   setPixelColorXY(x, y, color_blend(c, getPixelColorXY(x, y), keep, true));
+      if ((unsigned(x) < unsigned(cols)) && (unsigned(y) < unsigned(rows)))   setPixelColorXY_nochecks(x, y, color_blend(c, getPixelColorXY(x, y), keep, true));
       int xx = x+int(steep);
       int yy = y+int(!steep);
-      if ((unsigned(xx) < unsigned(cols)) && (unsigned(yy) < unsigned(rows))) setPixelColorXY(xx, yy, color_blend(c, getPixelColorXY(xx, yy), seep, true));
+      if ((unsigned(xx) < unsigned(cols)) && (unsigned(yy) < unsigned(rows))) setPixelColorXY_nochecks(xx, yy, color_blend(c, getPixelColorXY(xx, yy), seep, true));
 
       intersectY += gradient;
       if (steep) std::swap(x,y);  // restore if steep
@@ -853,11 +867,11 @@ void Segment::drawArc(unsigned x0, unsigned y0, int radius, uint32_t color, uint
       int newY2 = y - int(y0); newY2 *= newY2; // (distance from centerY) ^2
       int distance2 = newX2 + newY2;
       if ((distance2 >= minradius2) && (distance2 <= maxradius2)) {
-        setPixelColorXY(x, y, color);
+        setPixelColorXY_nochecks(x, y, color);
       } else {
       if (fillColor != 0)
         if (distance2 < minradius2)
-          setPixelColorXY(x, y, fillColor);
+          setPixelColorXY_nochecks(x, y, fillColor);
       }
     }
   }

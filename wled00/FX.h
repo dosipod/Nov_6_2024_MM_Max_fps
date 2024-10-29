@@ -716,11 +716,54 @@ typedef struct Segment {
 
         uint32_t scaled_col = (_brightness == 255) ? col : color_fade(col, _brightness);  // calculate final color
         setPixelColorXY_fast(x, y, col, scaled_col, int(_2dWidth), int(_2dHeight));       // call "fast" function
+      }
+    }
+
+#if 1
+    inline void setPixelColorXY_nochecks(int x, int y, uint32_t col) {
+      if (!_isSimpleSegment) { // slow path
+        setPixelColorXY_slow(x, y, col);
+      } else {                 // fast path
+        uint32_t scaled_col = (_brightness == 255) ? col : color_fade(col, _brightness);  // calculate final color
+        setPixelColorXY_fast(x, y, col, scaled_col, int(_2dWidth), int(_2dHeight));       // call "fast" function
+      }
+    }
+    inline uint32_t getPixelColorXY(int x, int y) const {
+        // minimal sanity checks
+        if (!_isValid2D) return 0;                                                // not active
+        if ((unsigned(x) >= _2dWidth) || (unsigned(y) >= _2dHeight)) return 0 ;   // check if (x,y) are out-of-range - due to 2's complement, this also catches negative values
+        else return getPixelColorXY_fast(x, y, int(_2dWidth), int(_2dHeight));    // call "fast" function
   }
-}
+#else
+#if 1
+  inline void setPixelColorXY_nochecks(int x, int y, uint32_t col) { setPixelColorXY(x,y,col);}
+#else
+    inline void setPixelColorXY_nochecks(int x, int y, uint32_t col) {
+      if (!_isSimpleSegment) { // slow path
+        setPixelColorXY_slow(x, y, col);
+      } else {                 // fast path
+        uint32_t scaled_col = (_brightness == 255) ? col : color_fade(col, _brightness);  // calculate final color
+        setPixelColorXY_fast(x, y, col, scaled_col, int(_2dWidth), int(_2dHeight));       // call "fast" function
+      }
+    }
+#endif
+#if 1
+  inline uint32_t getPixelColorXY(int x, int y) const { return getPixelColorXY_slow(x,y);}
+#else
+    inline uint32_t getPixelColorXY(int x, int y) const {
+        // minimal sanity checks
+        if (!_isValid2D) return 0;                                                // not active
+        if ((unsigned(x) >= _2dWidth) || (unsigned(y) >= _2dHeight)) return 0 ;   // check if (x,y) are out-of-range - due to 2's complement, this also catches negative values
+        else return getPixelColorXY_fast(x, y, int(_2dWidth), int(_2dHeight));    // call "fast" function
+  }
+#endif
+#endif
+
 #else
     void setPixelColorXY(int x, int y, uint32_t c); // set relative pixel within segment with color
+    uint32_t __attribute__((pure)) getPixelColorXY(int x, int y)  const { return getPixelColorXY_slow(x,y)};
 #endif
+    inline void setPixelColorXY_nochecks(int x, int y, CRGB c)                    { setPixelColorXY_nochecks(x, y, RGBW32(c.r,c.g,c.b,0)); }
     inline void setPixelColorXY(unsigned x, unsigned y, uint32_t c)               { setPixelColorXY(int(x), int(y), c); }
     inline void setPixelColorXY(int x, int y, byte r, byte g, byte b, byte w = 0) { setPixelColorXY(x, y, RGBW32(r,g,b,w)); }
     inline void setPixelColorXY(int x, int y, CRGB c)                             { setPixelColorXY(x, y, RGBW32(c.r,c.g,c.b,0)); }
@@ -730,7 +773,8 @@ typedef struct Segment {
     inline void setPixelColorXY(float x, float y, byte r, byte g, byte b, byte w = 0, bool aa = true) { setPixelColorXY(x, y, RGBW32(r,g,b,w), aa); }
     inline void setPixelColorXY(float x, float y, CRGB c, bool aa = true)                             { setPixelColorXY(x, y, RGBW32(c.r,c.g,c.b,0), aa); }
     //#endif
-    uint32_t __attribute__((pure)) getPixelColorXY(int x, int y)  const;
+    uint32_t __attribute__((pure)) getPixelColorXY_fast(int x, int y, int cols, int rows)  const;
+    uint32_t __attribute__((pure)) getPixelColorXY_slow(int x, int y)  const;
     // 2D support functions
     void blendPixelColorXY(uint16_t x, uint16_t y, uint32_t color, uint8_t blend);
     inline void blendPixelColorXY(uint16_t x, uint16_t y, CRGB c, uint8_t blend)  { blendPixelColorXY(x, y, RGBW32(c.r,c.g,c.b,0), blend); }

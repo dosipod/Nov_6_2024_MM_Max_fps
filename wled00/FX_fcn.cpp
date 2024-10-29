@@ -11,6 +11,21 @@
 #include <esp_timer.h>     // WLEDMM to get esp_timer_get_time() 
 #endif
 
+#if 1
+// fast math functions by dedehai
+#include "FX_math.h"
+#undef sin8
+#undef sin16
+#define sin8(x) sin8_t(x)
+#define cos8(x) cos8_t(x)
+#define sin16(x) sin16_t(x)
+#define cos16(x) cos16_t(x)
+#define beatsin8 beatsin8_t
+#define beatsin88 beatsin88_t
+#define beatsin16 beatsin16_t
+#define ColorFromPalette ColorFromPaletteWLED // override fastled version
+#endif
+
 /*
   Custom per-LED mapping has moved!
 
@@ -1471,7 +1486,7 @@ void __attribute__((hot)) Segment::fade_out(uint8_t rate) {
   int b2 = B(color2);
 
   for (unsigned y = 0; y < rows; y++) for (unsigned x = 0; x < cols; x++) {
-    uint32_t color = is2D() ? getPixelColorXY(int(x), int(y)) : getPixelColor(int(x));
+    uint32_t color = is2D() ? getPixelColorXY_fast(int(x), int(y), cols, rows) : getPixelColor(int(x));
     if (color == color2) continue;  // WLEDMM speedup - pixel color = target color, so nothing to do
     int w1 = W(color);
     int r1 = R(color);
@@ -1491,7 +1506,7 @@ void __attribute__((hot)) Segment::fade_out(uint8_t rate) {
     uint32_t colorNew = RGBW32(r1 + rdelta, g1 + gdelta, b1 + bdelta, w1 + wdelta); // WLEDMM
 
     if (colorNew != color) {                                                        // WLEDMM speedup - do not repaint the same color
-      if (is2D()) setPixelColorXY(int(x), int(y), colorNew);
+      if (is2D()) setPixelColorXY_nochecks(int(x), int(y), colorNew);
       else        setPixelColor(int(x), colorNew);
     }
   }
@@ -1507,12 +1522,12 @@ void __attribute__((hot)) Segment::fadeToBlackBy(uint8_t fadeBy) {
   // WLEDMM minor optimization
   if(is2D()) {
     for (unsigned y = 0; y < rows; y++) for (unsigned x = 0; x < cols; x++) {
-      uint32_t cc = getPixelColorXY(int(x),int(y));                            // WLEDMM avoid RGBW32 -> CRGB -> RGBW32 conversion
+      uint32_t cc = getPixelColorXY_fast(int(x),int(y), cols, rows);                            // WLEDMM avoid RGBW32 -> CRGB -> RGBW32 conversion
       uint32_t cc2 = color_fade(cc, scaledown);                      // fade
 #ifdef WLEDMM_FASTPATH
       if (cc2 != cc)                                               // WLEDMM only re-paint if faded color is different - normally disabled - causes problem with text overlay
 #endif
-        setPixelColorXY(int(x), int(y), cc2);
+        setPixelColorXY_nochecks(int(x), int(y), cc2);
     }
   } else {
     for (uint_fast16_t x = 0; x < cols; x++) {
@@ -2043,12 +2058,16 @@ void WS2812FX::estimateCurrentAndLimitBri() {
   currentMilliamps += pLen; //add standby power back to estimate
 }
 
+extern unsigned long long showtime;
+
 void WS2812FX::show(void) {
   if (OTAisRunning) return; // WLEDMM avoid flickering during OTA
 
   // avoid race condition, capture _callback value
   show_callback callback = _callback;
   if (callback) callback();
+
+  unsigned long long microshow = esp_timer_get_time();
 
   estimateCurrentAndLimitBri();
 
@@ -2059,6 +2078,10 @@ void WS2812FX::show(void) {
   // all of the data has been sent.
   // See https://github.com/Makuna/NeoPixelBus/wiki/ESP32-NeoMethods#neoesp32rmt-methods
   busses.show();
+
+  microshow = esp_timer_get_time() - microshow;
+  if (microshow < 10000000) showtime += microshow;
+
   unsigned long now = millis();
   unsigned long diff = now - _lastShow;
   uint16_t fpsCurr = 200;

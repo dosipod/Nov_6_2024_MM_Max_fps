@@ -8,12 +8,11 @@
  * color blend function
  */
 IRAM_ATTR_YN __attribute__((hot)) uint32_t color_blend(uint32_t color1, uint32_t color2, uint_fast16_t blend, bool b16) {
-  if(blend == 0)   return color1;
-  if (color1 == color2) return color1;  // WLEDMM shortcut
-  const uint_fast16_t blendmax = b16 ? 0xFFFF : 0xFF;
-  if(blend >= blendmax) return color2;
-  const uint_fast8_t shift = b16 ? 16 : 8;
-  const uint_fast16_t blend2 = blendmax - blend; // WLEDMM pre-calculate value
+  if (blend == 0) return color1;
+  unsigned blendmax = b16 ? 0xFFFF : 0xFF;
+  if (blend >= blendmax) return color2;
+  unsigned shift = b16 ? 16 : 8;
+  unsigned blend2 = blendmax - blend;
 
   uint32_t w1 = W(color1);
   uint32_t r1 = R(color1);
@@ -32,6 +31,72 @@ IRAM_ATTR_YN __attribute__((hot)) uint32_t color_blend(uint32_t color1, uint32_t
 
   return RGBW32(r3, g3, b3, w3);
 }
+
+#if 1
+/*
+ * color add function that preserves ratio
+ * original idea: https://github.com/Aircoookie/WLED/pull/2465 by https://github.com/Proto-molecule
+ * speed optimisations by @dedehai
+ */
+IRAM_ATTR_YN uint32_t __attribute__((hot)) color_add(uint32_t c1, uint32_t c2, bool preserveCR)   // WLEDMM added IRAM_ATTR_YN
+{
+  if (c1 == BLACK) return c2;
+  if (c2 == BLACK) return c1;
+  uint32_t rb = (c1 & 0x00FF00FF) + (c2 & 0x00FF00FF); // mask and add two colors at once
+  uint32_t wg = ((c1>>8) & 0x00FF00FF) + ((c2>>8) & 0x00FF00FF);
+  uint32_t r = rb >> 16; // extract single color values
+  uint32_t b = rb & 0xFFFF;
+  uint32_t w = wg >> 16;
+  uint32_t g = wg & 0xFFFF;
+
+  if (preserveCR) { // preserve color ratios
+    uint32_t max = std::max(r,g); // check for overflow note
+    max = std::max(max,b);
+    max = std::max(max,w);
+    //unsigned max = r; // check for overflow note
+    //max = g > max ? g : max;
+    //max = b > max ? b : max;
+    //max = w > max ? w : max;
+    if (max > 255) {
+      uint32_t scale = (uint32_t(255)<<8) / max; // division of two 8bit (shifted) values does not work -> use bit shifts and multiplaction instead
+      rb = ((rb * scale) >> 8) & 0x00FF00FF; //
+      wg = (wg * scale) & 0xFF00FF00;
+    } else wg = wg << 8; //shift white and green back to correct position
+    return rb | wg;
+  } else {
+    r = r > 255 ? 255 : r;
+    g = g > 255 ? 255 : g;
+    b = b > 255 ? 255 : b;
+    w = w > 255 ? 255 : w;
+    return RGBW32(r,g,b,w);
+  }
+}
+
+/*
+ * fades color toward black
+ * if using "video" method the resulting color will never become black unless it is already black
+ */
+
+IRAM_ATTR_YN __attribute__((hot)) uint32_t color_fade(uint32_t c1, uint8_t amount, bool video)
+{
+  if (c1 == BLACK || amount == 0) return BLACK;
+  if (amount == 255) return c1;
+  uint32_t scaledcolor; // color order is: W R G B from MSB to LSB
+    uint32_t scale = amount; // 32bit for faster calculation
+  uint32_t addRemains = 0;
+  if (!video) scale++; // add one for correct scaling using bitshifts
+  else { // video scaling: make sure colors do not dim to zero if they started non-zero
+    addRemains  = R(c1) ? 0x00010000 : 0;
+    addRemains |= G(c1) ? 0x00000100 : 0;
+    addRemains |= B(c1) ? 0x00000001 : 0;
+    addRemains |= W(c1) ? 0x01000000 : 0;
+  }
+  uint32_t rb = (((c1 & 0x00FF00FF) * scale) >> 8) & 0x00FF00FF; // scale red and blue
+  uint32_t wg = (((c1 & 0xFF00FF00) >> 8) * scale) & 0xFF00FF00; // scale white and green
+  scaledcolor = (rb | wg) + addRemains;
+    return scaledcolor;
+}
+#else
 
 /*
  * color add function that preserves ratio
@@ -97,6 +162,7 @@ IRAM_ATTR_YN __attribute__((hot)) uint32_t color_fade(uint32_t c1, uint8_t amoun
     return scaledcolor;
   }
 }
+#endif
 
 void setRandomColor(byte* rgb)
 {

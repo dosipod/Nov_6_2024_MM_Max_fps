@@ -61,6 +61,11 @@ void esp_heap_trace_free_hook(void* ptr)
 unsigned long lastMillis = 0; //WLEDMM
 unsigned long loopCounter = 0; //WLEDMM
 
+unsigned long lps = 0; // loops per second
+unsigned long lps2 = 0; // lps without "show"
+
+unsigned long long showtime = 0; // time spent in "show" (micros)
+
 void setup() __attribute__((used)); // needed for -flto
 void setup() {
   #ifdef WLED_DEBUG_HEAP
@@ -73,13 +78,19 @@ void loop() __attribute__((used)); // needed for -flto
 void loop() {
   //WLEDMM show loops per second
   loopCounter++;
-  if (millis() - lastMillis >= 10000) {
+  //if (millis() - lastMillis >= 10000) {
+  if (millis() - lastMillis >= 8000) {
     long delta = millis() - lastMillis;
     if (delta > 0) {
+      lps = (loopCounter*1000U) / delta;
       //USER_PRINTF("%lu lps\n",(loopCounter*1000U) / delta);
+      if (delta > (showtime / 1000)) lps2 = (loopCounter*1000U) / (delta - (showtime / 1000));
+      USER_PRINTF("%lu lps\n", lps);
+      USER_PRINTF("%lu lps without show\n", lps2);
     }
     lastMillis = millis();
     loopCounter = 0;
+    showtime = 0;
   }
 
   WLED::instance().loop();

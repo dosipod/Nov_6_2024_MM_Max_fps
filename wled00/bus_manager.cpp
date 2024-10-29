@@ -14,6 +14,8 @@
 bool getBitFromArray(const uint8_t* byteArray, size_t position) { // get bit value
     size_t byteIndex = position / 8;
     unsigned bitIndex = position % 8;
+    //size_t byteIndex = position >> 3;
+    //unsigned bitIndex = position & 0x07; // last 3 bits
     uint8_t byteValue = byteArray[byteIndex];
     return (byteValue >> bitIndex) & 1;
 }
@@ -22,6 +24,8 @@ void setBitInArray(uint8_t* byteArray, size_t position, bool value) {  // set bi
     //if (byteArray == nullptr) return;
     size_t byteIndex = position / 8;
     unsigned bitIndex = position % 8;
+    //size_t byteIndex = position >> 3;
+    //unsigned bitIndex = position & 0x07; // last 3 bits
     if (value)
         byteArray[byteIndex] |= (1 << bitIndex); 
     else
@@ -580,7 +584,8 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
   }
 
     mxconfig.double_buff = false; // Use our own memory-optimised buffer rather than the driver's own double-buffer
- 
+
+  // FM6124, FM6126A, ICN2038S, MBI5124, SM5266P, DP3246_SM5368
   // mxconfig.driver = HUB75_I2S_CFG::ICN2038S;  // experimental - use specific shift register driver
   // mxconfig.driver = HUB75_I2S_CFG::FM6124;    // try this driver in case you panel stays dark, or when colors look too pastel
 
@@ -589,7 +594,20 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
   // mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_10M;  // experimental - 5MHZ should be enugh, but colours looks slightly better at 10MHz
   // mxconfig.min_refresh_rate = 90;
   mxconfig.clkphase = false; // can help in case that the leftmost column is invisible, or pixels on the right side "bleeds out" to the left.
- 
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && defined(BOARD_HAS_PSRAM) // ESP32-S3, 128x64 FM6124
+  mxconfig.driver = HUB75_I2S_CFG::FM6124;    // try this driver in case you panel stays dark, or when colors look too pastel
+  mxconfig.latch_blanking = 1;                // needed for some ICS panels
+  mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;  // experimental - 5MHZ should be enugh, but colours looks slightly better at 10MHz
+  mxconfig.min_refresh_rate = 90;
+#elif defined(CONFIG_IDF_TARGET_ESP32) // ESP32, 64x64 ICN2037S
+  mxconfig.driver = HUB75_I2S_CFG::SHIFTREG;
+  mxconfig.latch_blanking = 1;                 // needed for some ICS panels
+  // mxconfig.latch_blanking = 3;              // use in case you see gost images
+  mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_10M;   // experimental - 5MHZ should be enugh, but colours looks slightly better at 10MHz
+  mxconfig.min_refresh_rate = 90;
+#endif
+
   // How many panels we have connected, cap at sane value
   mxconfig.chain_length = max((uint8_t) 1, min(bc.pins[0], (uint8_t) 4)); // prevent bad data preventing boot due to low memory
 
@@ -674,6 +692,51 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
 
 #elif defined(CONFIG_IDF_TARGET_ESP32S3) && defined(BOARD_HAS_PSRAM)// ESP32-S3
 
+#if 1
+  USER_PRINTLN("MatrixPanel_I2S_DMA - T7 S3 board with PSRAM");
+  mxconfig.gpio.r1 = 1;
+  mxconfig.gpio.g1 = 5;
+  mxconfig.gpio.b1 = 6;  // CLK
+
+  mxconfig.gpio.r2 = 7;
+  mxconfig.gpio.g2 = 13;
+  mxconfig.gpio.b2 = 9;
+
+  mxconfig.gpio.lat = 8;
+
+  mxconfig.gpio.oe  = 4; // should be a clk_out pin??? --> 18
+  mxconfig.gpio.clk = 18;
+
+  mxconfig.gpio.a = 16;
+  mxconfig.gpio.b = 48; // 48 = ws2812 led ==> 10
+  mxconfig.gpio.c = 47;
+  mxconfig.gpio.d = 21;
+  mxconfig.gpio.e = 38;
+  #warning "T3-S3 config active"
+#else
+#if 1
+
+  USER_PRINTLN("MatrixPanel_I2S_DMA - S3dev board with PSRAM");
+  mxconfig.gpio.r1 = 1;
+  mxconfig.gpio.g1 = 5;
+  mxconfig.gpio.b1 = 6;
+
+  mxconfig.gpio.r2 = 7;
+  mxconfig.gpio.g2 = 11;
+  mxconfig.gpio.b2 = 9;
+
+  mxconfig.gpio.lat = 8;
+  mxconfig.gpio.oe  = 18; // was: 4; // should be a clk_out pin??? --> 18
+  mxconfig.gpio.clk = 39;
+
+  mxconfig.gpio.a = 16;
+  mxconfig.gpio.b = 10; // 48; // 48 = ws2812 led
+  mxconfig.gpio.c = 47;
+  mxconfig.gpio.d = 21;
+  mxconfig.gpio.e = 38;
+  #warning "S3 generic config active"
+
+#else
   USER_PRINTLN("MatrixPanel_I2S_DMA - S3 with PSRAM");
 
   mxconfig.gpio.r1 =  1;
@@ -692,6 +755,8 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
   mxconfig.gpio.lat = 8;
   mxconfig.gpio.oe  = 3;
   // 16th pin is GND
+#endif
+#endif
 
 #elif defined(CONFIG_IDF_TARGET_ESP32S3) // ESP32-S3
 
@@ -876,6 +941,7 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
   // let's adjust default brightness
   //display->setBrightness8(25);    // range is 0-255, 0 - 0%, 255 - 100% //  [setBrightness()] Tried to set output brightness before begin()
   _bri = 25;
+  //_bri = 238; //  ((60/64)*255) seems to be the limit before ghosting on a 64 pixel wide
 
   delay(24); // experimental
   DEBUG_PRINT(F("heap usage: ")); DEBUG_PRINTLN(int(lastHeap - ESP.getFreeHeap()));
@@ -893,6 +959,7 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
     USER_PRINT(F("heap usage: ")); USER_PRINTLN(int(lastHeap - ESP.getFreeHeap()));
     delay(18);   // experiment - give the driver a moment (~ one full frame @ 60hz) to settle
     _valid = true;
+    //display->setBrightness(_bri);
     display->clearScreen();   // initially clear the screen buffer
     USER_PRINTLN("MatrixPanel_I2S_DMA clear ok");
 
@@ -1028,20 +1095,43 @@ uint32_t __attribute__((hot)) BusHub75Matrix::getPixelColorRestored(uint16_t pix
     return BLACK;   // we don't know anything about the pixel
 }
 
+static int lastB = 0;
+static int briMax = 253;
+
 void BusHub75Matrix::setBrightness(uint8_t b, bool immediate) {
   _bri = b;
-  if (!_valid) return;
-  MatrixPanel_I2S_DMA* display = BusHub75Matrix::activeDisplay;
+  //if (!_valid) return;
+  //MatrixPanel_I2S_DMA* display = BusHub75Matrix::activeDisplay;
+
+  //if (_bri != lastB) {USER_PRINTF("Brightness = %d (%d)    %s\n", _bri, b, display?"(active)":"(not active)");};
+  //lastB = _bri;
+
+  //if (display == nullptr) return;
   // if (_bri > 238) _bri=238; // not strictly needed. Enable this line if you see glitches at highest brightness.
   if ((_bri > 253) && (activeMXconfig.latch_blanking < 2)) _bri=253; // prevent glitches at highest brightness.
-  if (display) display->setBrightness(_bri);
+  //display->setBrightness8(_bri);
 }
 
 void __attribute__((hot)) BusHub75Matrix::show(void) {
   if (!_valid) return;
   MatrixPanel_I2S_DMA* display = BusHub75Matrix::activeDisplay;
+
+  if (_bri != lastB) {USER_PRINTF("Brightness = %d    %s\n", _bri, display?"(active)":"(not active)");};
+  //uint8_t scaledBri = scale8(_bri, briMax);
+  uint8_t scaledBri = _bri;
+
   if (!display) return;
-  display->setBrightness(_bri);
+  //bool fastDraw = true;
+  if (lastB != _bri) {
+    // Note: If you change the brightness with setBrightness() you MUST then clearScreen() and repaint / flush the entire framebuffer.
+    //fastDraw = false;
+#if 1
+    display->setBrightness(_bri);
+    //display->clearScreen();
+#endif
+  }
+
+  lastB = _bri;
 
   if (_ledBuffer) {
     // write out buffered LEDs
@@ -1055,6 +1145,7 @@ void __attribute__((hot)) BusHub75Matrix::show(void) {
 
     size_t pix = 0; // running pixel index
     for (int y=0; y<height; y++) for (int x=0; x<width; x++) {
+      //if (!fastDraw || getBitFromArray(_ledsDirty, pix) == true) {        // only repaint the "dirty"  pixels
       if (getBitFromArray(_ledsDirty, pix) == true) {        // only repaint the "dirty"  pixels
         #ifndef NO_CIE1931
         uint32_t c = uint32_t(_ledBuffer[pix]) & 0x00FFFFFF; // get RGB color, removing FastLED "alpha" component 
@@ -1075,6 +1166,7 @@ void __attribute__((hot)) BusHub75Matrix::show(void) {
     }
     setBitArray(_ledsDirty, _len, false);  // buffer shown - reset all dirty bits
   }
+  //display->setBrightness8(_bri);  // fix for -S3 brightness control not working 
 }
 
 void BusHub75Matrix::cleanup() {
