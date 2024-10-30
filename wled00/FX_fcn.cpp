@@ -121,7 +121,8 @@ void Segment::allocLeds() {
       ledsrgb = (CRGB*)calloc(size, 1);
     }
     #else
-    ledsrgb = (CRGB*)calloc(size, 1);
+    ledsrgb = (CRGB*)heap_caps_calloc_prefer(size, 1, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT);
+    // ledsrgb = (CRGB*)calloc(size, 1);
     #endif
     ledsrgbSize = ledsrgb?size:0;
     if (ledsrgb == nullptr) {
@@ -235,7 +236,7 @@ bool Segment::allocateData(size_t len) {
   //DEBUG_PRINTF("allocateData(%u) start %d, stop %d, vlen %d\n", len, start, stop, virtualLength());
   deallocateData();
   if (len == 0) return false; // nothing to do
-  #if defined(ARDUINO_ARCH_ESP32) && !defined(WLED_USE_PSRAM)
+  #if defined(ARDUINO_ARCH_ESP32) && !defined(BOARD_HAS_PSRAM) // !defined(WLED_USE_PSRAM)
   if (Segment::getUsedSegmentData() + len > MAX_SEGMENT_DATA) {
     //USER_PRINTF("Segment::allocateData: Segment data quota exceeded! used:%u request:%u max:%d\n", Segment::getUsedSegmentData(), len, MAX_SEGMENT_DATA);
     if (len > 0) errorFlag = ERR_LOW_SEG_MEM;  // WLEDMM raise errorflag
@@ -248,7 +249,8 @@ bool Segment::allocateData(size_t len) {
    data = (byte*) ps_malloc(len);
   else
   #endif
-    data = (byte*) malloc(len);
+    // data = (byte*) malloc(len);
+    data = (byte*) heap_caps_calloc_prefer(len, 1, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT);
   if (!data) {
       _dataLen = 0; // WLEDMM reset dataLen
       errorFlag = ERR_LOW_MEM; // WLEDMM raise errorflag
@@ -258,7 +260,7 @@ bool Segment::allocateData(size_t len) {
   } //allocation failed
   Segment::addUsedSegmentData(len);
   _dataLen = len;
-  memset(data, 0, len);
+  // memset(data, 0, len); // already done with calloc
   if (errorFlag == ERR_LOW_SEG_MEM) errorFlag = ERR_NONE; // WLEDMM reset errorflag on success
   return true;
 }
@@ -2643,7 +2645,8 @@ bool WS2812FX::deserializeMap(uint8_t n) {
         customMappingTable = (uint16_t*) calloc(size, sizeof(uint16_t));
       }
       #else
-      customMappingTable = (uint16_t*) calloc(size, sizeof(uint16_t));
+      // customMappingTable = (uint16_t*) calloc(size, sizeof(uint16_t));
+      customMappingTable = (uint16_t*) heap_caps_calloc_prefer(size, sizeof(uint16_t), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT);
       #endif
       if (customMappingTable == nullptr) { 
         DEBUG_PRINTLN("deserializeMap: alloc failed!");
